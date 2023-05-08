@@ -16,11 +16,12 @@ options.add_argument("--headless")
 service = Service(chrome_driver_path)
 driver = webdriver.Chrome(options=options)
 
-def extract_links_from_page(coin, time_frame):
+def extract_links_from_page(coin, time_frame, num_of_days):
+    print(num_of_days)
     page_url = f'https://data.binance.vision/?prefix=data/futures/um/daily/klines/{coin}/{time_frame}/'
 
     driver.get(page_url)
-    time.sleep(7)
+    time.sleep(8)
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     zip_links = []
@@ -35,10 +36,10 @@ def extract_links_from_page(coin, time_frame):
             if a_tag and a_tag['href'].endswith('.zip'):
                 zip_links.append(a_tag['href'])
 
-    for link in zip_links[:10]:
+    for link in zip_links[:num_of_days]:
         print(link)
 
-    return zip_links[:10]
+    return zip_links[:num_of_days]
 
 def download_and_extract_zip(args):
     i, link = args
@@ -90,14 +91,16 @@ def get_user_input():
     coin = input('Enter the coin you want to scrape (e.g. BTCUSDT): ')
     list_of_time_frames = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
     time_frame = input(f'Enter the time frame you want to scrape\nTime frames available: {list_of_time_frames}: ')
+    num_of_days = input(f'Enter previous number of days you want to scrape: ')
 
     coin = coin.upper()
     time_frame = time_frame.lower()
-    return coin, time_frame
+    num_of_days = int(num_of_days)
+    return coin, time_frame, num_of_days
 
 if __name__ == '__main__':
-    coin, time_frame = get_user_input()
-    zip_links = extract_links_from_page(coin, time_frame)
+    coin, time_frame, num_of_days = get_user_input()
+    zip_links = extract_links_from_page(coin, time_frame, num_of_days)
     temp_dir = os.path.join(script_dir, 'temp')
     
     if not os.path.exists(temp_dir):
@@ -119,11 +122,10 @@ if __name__ == '__main__':
         is_sorted = df.open_time.is_monotonic_increasing
 
         print(f'Number of duplicates: {duplicates.sum()}')
-        print(f'data_list length    : {len(data_list)}')
-        print(f'zip_links length    : {len(zip_links)}')
         print(f'Number of rows      : {len(df)}')
         print(f'open_time is unique : {df.open_time.is_unique}')
         print(f'open_time is sorted : {is_sorted}')
+        print(f'Data has been successfully downloaded and merged to single csv file')
 
         if (not is_sorted):
             df.sort_values('open_time', inplace=True)

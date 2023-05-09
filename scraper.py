@@ -1,5 +1,8 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 import requests
 import concurrent.futures
@@ -17,11 +20,13 @@ service = Service(chrome_driver_path)
 driver = webdriver.Chrome(options=options)
 
 def extract_links_from_page(coin, time_frame, num_of_days):
-    print(num_of_days)
     page_url = f'https://data.binance.vision/?prefix=data/futures/um/daily/klines/{coin}/{time_frame}/'
 
     driver.get(page_url)
-    time.sleep(8)
+    wait = WebDriverWait(driver, 16)
+    element_id = "listing"
+    expected_children = 10
+    wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, f"#{element_id} > *:nth-child({expected_children})")))    
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     zip_links = []
@@ -131,7 +136,7 @@ if __name__ == '__main__':
             df.sort_values('open_time', inplace=True)
             print(f'open_time is sorted : {df.open_time.is_monotonic_increasing}')
 
-        df.to_csv(os.path.join(script_dir, 'merged_data.csv'), index=False)
+        df.to_csv(os.path.join(script_dir, f'{coin.lower()}_{time_frame}_{num_of_days}.csv'), index=False)
 
         for file in os.listdir(temp_dir):
             os.remove(os.path.join(temp_dir, file))

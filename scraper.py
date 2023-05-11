@@ -4,12 +4,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
+from threading import Lock
 import requests
 import concurrent.futures
 import os
 import zipfile
 import pandas as pd
 import time
+import inquirer
 
 chrome_driver_path = os.getenv('CHROME_DRIVER_PATH')
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,8 +21,18 @@ options.add_argument("--headless")
 service = Service(chrome_driver_path)
 driver = webdriver.Chrome(options=options)
 
-def extract_links_from_page(coin, time_frame, num_of_days):
-    page_url = f'https://data.binance.vision/?prefix=data/futures/um/daily/klines/{coin}/{time_frame}/'
+lock = Lock()
+temp_csv_dir = os.path.join(script_dir, f'temp_{int(time.time())}')
+
+csv_columns = ['open_time', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_volume', 'count', 'taker_buy_volume', 'taker_buy_volume', 'ignore']
+list_of_time_frames = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
+list_of_market_types = ['spot', 'futures']
+
+def extract_links_from_page(coin, time_frame, num_of_days, data_type):
+    if data_type == 'spot':
+        page_url = f'https://data.binance.vision/?prefix=data/spot/daily/klines/{coin}/{time_frame}/'
+    elif data_type == 'futures':
+        page_url = f'https://data.binance.vision/?prefix=data/futures/um/daily/klines/{coin}/{time_frame}/'
 
     driver.get(page_url)
     wait = WebDriverWait(driver, 16)
@@ -41,75 +53,76 @@ def extract_links_from_page(coin, time_frame, num_of_days):
             if a_tag and a_tag['href'].endswith('.zip'):
                 zip_links.append(a_tag['href'])
 
-    for link in zip_links[:num_of_days]:
-        print(link)
-
     return zip_links[:num_of_days]
 
 def download_and_extract_zip(args):
     i, link = args
     response = requests.get(link)
     filename = link.split('/')[-1]
-    with open(os.path.join(script_dir, filename), 'wb') as f:
+    with open(os.path.join(temp_csv_dir, filename), 'wb') as f:
         f.write(response.content)
 
-    zip_ref = zipfile.ZipFile(os.path.join(script_dir, filename), 'r')
+    zip_ref = zipfile.ZipFile(os.path.join(temp_csv_dir, filename), 'r')
     extracted_files = set()
     for file in zip_ref.namelist():
         extracted_files.add(file.split('/')[-1])
-        zip_ref.extract(file, temp_dir)
+        zip_ref.extract(file, temp_csv_dir)
 
     zip_ref.close()
 
-    csv_files = [f for f in os.listdir(temp_dir) if f.endswith('.csv')]
+    csv_files = [f for f in os.listdir(temp_csv_dir) if f.endswith('.csv')]
     temp_data_list = []
 
     for csv_file in csv_files:
         if csv_file in processed_files:
             continue
         processed_files.add(csv_file)
-        temp_data_list.append(process_csv_file(os.path.join(temp_dir, csv_file)))
+        temp_data_list.append(process_csv_file(os.path.join(temp_csv_dir, csv_file)))
 
     return temp_data_list
 
 def process_csv_file(csv_file):
     if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-        return pd.read_csv(csv_file)
+        data = pd.read_csv(csv_file)
+        data.columns = csv_columns
+        return data
     else:
-        print(f"{csv_file} does not exist or is empty")
-        time.sleep(2)
+        time.sleep(3)
         if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
-            return pd.read_csv(csv_file)
+            return process_csv_file(csv_file)
         else:
             print(f"{csv_file} does not exist or is empty AGAIN")
 
-def extract_zip_file(zip_file):
-    print(f'Extracting {zip_file} to {temp_dir}')
-    try:
-        zip_ref = zipfile.ZipFile(os.path.join(script_dir, zip_file), 'r')
-        zip_ref.extractall(temp_dir)
-        zip_ref.close()
-    except Exception as e:
-        print(f'Error extracting {zip_file}: {e}')
-
 def get_user_input():
-    coin = input('Enter the coin you want to scrape (e.g. BTCUSDT): ')
-    list_of_time_frames = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
-    time_frame = input(f'Enter the time frame you want to scrape\nTime frames available: {list_of_time_frames}: ')
-    num_of_days = input(f'Enter previous number of days you want to scrape: ')
+    data_type_prompt = [
+        inquirer.List('data_type', message='Enter the data type you want to scrape', choices=list_of_market_types)
+    ]
 
-    coin = coin.upper()
-    time_frame = time_frame.lower()
-    num_of_days = int(num_of_days)
-    return coin, time_frame, num_of_days
+    coin_prompt = [
+        inquirer.Text('coin', message='Enter the coin you want to scrape (e.g., BTCUSDT)')
+    ]
+
+    time_frame_prompt = [
+        inquirer.List('time_frame', message='Enter the time frame you want to scrape', choices=list_of_time_frames)
+    ]
+
+    num_of_days_prompt = [
+        inquirer.Text('num_of_days', message='Enter the number of previous days you want to scrape')
+    ]
+
+    data_type = inquirer.prompt(data_type_prompt)['data_type'].lower()
+    coin = inquirer.prompt(coin_prompt)['coin'].upper()
+    time_frame = inquirer.prompt(time_frame_prompt)['time_frame'].lower()
+    num_of_days = int(inquirer.prompt(num_of_days_prompt)['num_of_days'])
+
+    return coin, time_frame, num_of_days, data_type
 
 if __name__ == '__main__':
-    coin, time_frame, num_of_days = get_user_input()
-    zip_links = extract_links_from_page(coin, time_frame, num_of_days)
-    temp_dir = os.path.join(script_dir, 'temp')
+    coin, time_frame, num_of_days, data_type = get_user_input()
+    zip_links = extract_links_from_page(coin, time_frame, num_of_days, data_type)
     
-    if not os.path.exists(temp_dir):
-        os.makedirs(temp_dir)
+    if not os.path.exists(temp_csv_dir):
+        os.makedirs(temp_csv_dir)
 
     data_list = []
     processed_files = set()
@@ -125,23 +138,22 @@ if __name__ == '__main__':
 
         duplicates = df.duplicated()
         is_sorted = df.open_time.is_monotonic_increasing
-
-        print(f'Number of duplicates: {duplicates.sum()}')
-        print(f'Number of rows      : {len(df)}')
-        print(f'open_time is unique : {df.open_time.is_unique}')
-        print(f'open_time is sorted : {is_sorted}')
-        print(f'Data has been successfully downloaded and merged to single csv file')
+        is_unique = df.open_time.is_unique
 
         if (not is_sorted):
             df.sort_values('open_time', inplace=True)
-            print(f'open_time is sorted : {df.open_time.is_monotonic_increasing}')
+
+        print(f'Number of duplicates: {duplicates.sum()}')
+        print(f'Number of rows      : {len(df)}')
+        
+        if (is_unique and is_sorted):
+            print(f'Data has been successfully downloaded and merged to single csv file')
 
         df.to_csv(os.path.join(script_dir, f'{coin.lower()}_{time_frame}_{num_of_days}.csv'), index=False)
 
-        for file in os.listdir(temp_dir):
-            os.remove(os.path.join(temp_dir, file))
-        os.rmdir(temp_dir)
-        for link in zip_links:
-            os.remove(os.path.join(script_dir, link.split('/')[-1]))
+        for file in os.listdir(temp_csv_dir):
+            os.remove(os.path.join(temp_csv_dir, file))
+
+        os.rmdir(temp_csv_dir)
 
     driver.quit()

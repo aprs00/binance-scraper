@@ -117,15 +117,12 @@ def get_user_input():
     data_type_prompt = [
         inquirer.List('data_type', message='Enter the data type you want to scrape', choices=list_of_market_types)
     ]
-
     coin_prompt = [
         inquirer.Text('coin', message='Enter the coin you want to scrape (e.g., BTCUSDT)')
     ]
-
     time_frame_prompt = [
         inquirer.List('time_frame', message='Enter the time frame you want to scrape', choices=list_of_time_frames)
     ]
-
     select_date_type_prompt = [
         inquirer.List('date_type', message='How much data you want to scrape', choices=['all', 'date range', 'number of days'])
     ]
@@ -141,7 +138,6 @@ def get_user_input():
             inquirer.Text("start_date", message="Enter the start date (YYYY-MM-DD)", validate=validate_date),
             inquirer.Text("end_date", message="Enter the end date (YYYY-MM-DD)", validate=validate_date),
         ]
-
         answers = inquirer.prompt(questions)
         start_date = datetime.datetime.strptime(answers["start_date"], "%Y-%m-%d")
         end_date = datetime.datetime.strptime(answers["end_date"], "%Y-%m-%d")
@@ -150,7 +146,6 @@ def get_user_input():
         num_of_days_prompt = [
             inquirer.Text('num_of_days', message='Enter the number of previous days you want to scrape')
         ]
-
         num_of_days = int(inquirer.prompt(num_of_days_prompt)['num_of_days'])
     elif date_type == 'all':
         num_of_days = 'all'

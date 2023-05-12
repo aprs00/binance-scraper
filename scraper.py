@@ -12,6 +12,7 @@ import zipfile
 import pandas as pd
 import time
 import inquirer
+import datetime
 
 chrome_driver_path = os.getenv('CHROME_DRIVER_PATH')
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -53,7 +54,7 @@ def extract_links_from_page(coin, time_frame, num_of_days, data_type):
             if a_tag and a_tag['href'].endswith('.zip'):
                 zip_links.append(a_tag['href'])
 
-    return zip_links[:num_of_days]
+    return zip_links if num_of_days == 'all' else zip_links[:num_of_days]
 
 def download_and_extract_zip(args):
     i, link = args
@@ -93,6 +94,25 @@ def process_csv_file(csv_file):
         else:
             print(f"{csv_file} does not exist or is empty AGAIN")
 
+def validate_date(answers, current):
+    try:
+        date = datetime.datetime.strptime(current, "%Y-%m-%d")
+
+        today = datetime.datetime.now().date()
+        if date.date() > today:
+            return "Please enter a date before today"
+
+        start_date = datetime.datetime.strptime(answers.get("start_date", ""), "%Y-%m-%d")
+        if current and start_date and start_date >= date:
+            return "Start date should be earlier than the end date"
+
+        return True
+    except ValueError:
+        return "Please enter a valid date in the format YYYY-MM-DD"
+
+def get_date_difference(start_date, end_date):
+    return (end_date - start_date).days + 1
+
 def get_user_input():
     data_type_prompt = [
         inquirer.List('data_type', message='Enter the data type you want to scrape', choices=list_of_market_types)
@@ -106,14 +126,36 @@ def get_user_input():
         inquirer.List('time_frame', message='Enter the time frame you want to scrape', choices=list_of_time_frames)
     ]
 
-    num_of_days_prompt = [
-        inquirer.Text('num_of_days', message='Enter the number of previous days you want to scrape')
+    select_date_type_prompt = [
+        inquirer.List('date_type', message='How much data you want to scrape', choices=['all', 'date range', 'number of days'])
     ]
 
     data_type = inquirer.prompt(data_type_prompt)['data_type'].lower()
     coin = inquirer.prompt(coin_prompt)['coin'].upper()
     time_frame = inquirer.prompt(time_frame_prompt)['time_frame'].lower()
-    num_of_days = int(inquirer.prompt(num_of_days_prompt)['num_of_days'])
+
+    date_type = inquirer.prompt(select_date_type_prompt)['date_type'].lower()
+
+    if date_type == 'date range':
+        questions = [
+            inquirer.Text("start_date", message="Enter the start date (YYYY-MM-DD)", validate=validate_date),
+            inquirer.Text("end_date", message="Enter the end date (YYYY-MM-DD)", validate=validate_date),
+        ]
+
+        answers = inquirer.prompt(questions)
+        start_date = datetime.datetime.strptime(answers["start_date"], "%Y-%m-%d")
+        end_date = datetime.datetime.strptime(answers["end_date"], "%Y-%m-%d")
+        num_of_days = get_date_difference(start_date, end_date)
+    elif date_type == 'number of days':
+        num_of_days_prompt = [
+            inquirer.Text('num_of_days', message='Enter the number of previous days you want to scrape')
+        ]
+
+        num_of_days = int(inquirer.prompt(num_of_days_prompt)['num_of_days'])
+    elif date_type == 'all':
+        num_of_days = 'all'
+    else:
+        raise Exception('Invalid date type')
 
     return coin, time_frame, num_of_days, data_type
 
@@ -145,7 +187,7 @@ if __name__ == '__main__':
 
         print(f'Number of duplicates: {duplicates.sum()}')
         print(f'Number of rows      : {len(df)}')
-        
+
         if (is_unique and is_sorted):
             print(f'Data has been successfully downloaded and merged to single csv file')
 

@@ -1,9 +1,3 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
-from bs4 import BeautifulSoup
 from threading import Lock
 import requests
 import concurrent.futures
@@ -14,13 +8,7 @@ import time
 import inquirer
 import datetime
 
-chrome_driver_path = os.getenv('CHROME_DRIVER_PATH')
 script_dir = os.path.dirname(os.path.abspath(__file__))
-
-options = webdriver.ChromeOptions()
-options.add_argument("--headless")
-service = Service(chrome_driver_path)
-driver = webdriver.Chrome(options=options)
 
 lock = Lock()
 temp_csv_dir = os.path.join(script_dir, f'temp_{int(time.time())}')
@@ -29,32 +17,37 @@ csv_columns = ['open_time', 'open', 'high', 'low', 'close', 'volume', 'close_tim
 list_of_time_frames = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
 list_of_market_types = ['spot', 'futures']
 
-def extract_links_from_page(coin, time_frame, num_of_days, data_type):
+def get_zip_links(coin, time_frame, num_of_days, data_type):
     if data_type == 'spot':
-        page_url = f'https://data.binance.vision/?prefix=data/spot/daily/klines/{coin}/{time_frame}/'
+        base_url = "https://data.binance.vision/data/spot/daily/klines/"
     elif data_type == 'futures':
-        page_url = f'https://data.binance.vision/?prefix=data/futures/um/daily/klines/{coin}/{time_frame}/'
+        base_url = "https://data.binance.vision/data/futures/um/daily/klines/"
+    else: 
+        print("Invalid data type")
+        return
 
-    driver.get(page_url)
-    wait = WebDriverWait(driver, 16)
-    element_id = "listing"
-    expected_children = 10
-    wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, f"#{element_id} > *:nth-child({expected_children})")))    
-
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
     zip_links = []
+    current_date = datetime.datetime.now().date() - datetime.timedelta(days=1)
+    
+    if num_of_days == 'all':
+        while True:
+            date_str = current_date.strftime("%Y-%m-%d")
+            zip_url = f"{base_url}{coin}/{time_frame}/{coin}-{time_frame}-{date_str}.zip"
+            response = requests.get(zip_url)
+            
+            if response.status_code != 200:
+                break
+            
+            zip_links.append(zip_url)
+            current_date -= datetime.timedelta(days=1)
+    else:
+        for _ in range(num_of_days):
+            date_str = current_date.strftime("%Y-%m-%d")
+            zip_url = f"{base_url}{coin}/{time_frame}/{coin}-{time_frame}-{date_str}.zip"
+            zip_links.append(zip_url)
+            current_date -= datetime.timedelta(days=1)
 
-    tbody = soup.find('tbody')
-    rows = tbody.find_all('tr')
-
-    for row in rows:
-        cells = row.find_all('td')
-        for cell in cells:
-            a_tag = cell.find('a')
-            if a_tag and a_tag['href'].endswith('.zip'):
-                zip_links.append(a_tag['href'])
-
-    return zip_links if num_of_days == 'all' else zip_links[:num_of_days]
+    return zip_links
 
 def download_and_extract_zip(args):
     i, link = args
@@ -156,15 +149,15 @@ def get_user_input():
 
 if __name__ == '__main__':
     coin, time_frame, num_of_days, data_type = get_user_input()
-    zip_links = extract_links_from_page(coin, time_frame, num_of_days, data_type)
-    
+    zip_links = get_zip_links(coin, time_frame, num_of_days, data_type)
+
     if not os.path.exists(temp_csv_dir):
         os.makedirs(temp_csv_dir)
 
     data_list = []
     processed_files = set()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=40) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=44) as executor:
         futures = [executor.submit(download_and_extract_zip, (i, link)) for i, link in enumerate(zip_links)]
         for future in concurrent.futures.as_completed(futures):
             temp_data_list = future.result()
@@ -192,5 +185,3 @@ if __name__ == '__main__':
             os.remove(os.path.join(temp_csv_dir, file))
 
         os.rmdir(temp_csv_dir)
-
-    driver.quit()
